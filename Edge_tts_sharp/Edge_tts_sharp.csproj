@@ -7,7 +7,7 @@
 		
 		<!--以下是我们自己添加的-->
 		<!--版本号，重要性不必多说-->
-		<Version>1.1.2</Version>
+		<Version>1.2.0</Version>
 		<!--添加该配置，在编译时进行打包-->
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<!--添加该配置才会生成注释文件，默认无注释-->
@@ -16,8 +16,6 @@
 		<Authors>ZongziTEK</Authors>
 		<Description>
 			Entity-Now/Edge_tts_sharp 的 .NET Framework 版本
-
-			所有功能由 Entity-Now 开发，ZongziTEK 将目标框架更改为 .NET Framework 并解决在 .NET Framework 项目中的冲突问题
 		</Description>
 		<PackageProjectUrl>https://github.com/STBBRD/EdgeTTS_dotNET_Framework</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/Entity-Now/Edge_tts_sharp</RepositoryUrl>
@@ -25,7 +23,6 @@
 		<PackageIcon>MenuLogo.png</PackageIcon>
 		<RepositoryType>git</RepositoryType>
 		<UserSecretsId>099b9a5e-4ebd-4672-8871-9986815c01f8</UserSecretsId>
-		<Copyright>所有功能由 Entity-Now 开发，ZongziTEK 将目标框架更改为 .NET Framework 并解决在 .NET Framework 项目中的冲突问题</Copyright>
 	</PropertyGroup>
 
 	<ItemGroup>

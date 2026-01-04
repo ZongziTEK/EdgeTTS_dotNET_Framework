@@ -1,11 +1,14 @@
 ﻿// See https://aka.ms/new-console-template for more information
 using Edge_tts_sharp;
 using Edge_tts_sharp.Model;
+using Edge_tts_sharp.Utils;
+using System.Threading.Tasks;
+using System.Web;
 
 Edge_tts.Await = true;
 PlayOption option = new PlayOption
 {
-    Rate = 0,
+    Rate = 1,
     Text = ""
 };
 string msg = string.Empty;

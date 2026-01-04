@@ -142,46 +142,14 @@ public class Edge_tts
         var ws = new ClientWebSocket()
         {
             Options =
-        {
-            Cookies = new CookieContainer()
-        }
-        };
-
-        // 通过反射设置 Header
-        Action<string, string> setHeaderWithReflection = (string name, string value) =>
-        {
-            try
             {
-                var headersProperty = typeof(System.Net.WebSockets.ClientWebSocketOptions)
-                    .GetProperty("Headers", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-                if (headersProperty != null)
-                {
-                    var headers = (System.Net.WebHeaderCollection)headersProperty.GetValue(ws.Options);
-
-                    var addMethod = typeof(System.Net.WebHeaderCollection)
-                        .GetMethod("AddWithoutValidate", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-                    addMethod.Invoke(headers, new object[] { name, value });
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"反射设置 Header [{name}] 失败: {ex.Message}");
+                Cookies = new CookieContainer()
             }
         };
 
-        // 先尝试正常设置，如果报错（受限头），则自动改用反射
         foreach (var header in Headers)
         {
-            try
-            {
-                ws.Options.SetRequestHeader(header.Key, header.Value);
-            }
-            catch (ArgumentException)
-            {
-                setHeaderWithReflection(header.Key, header.Value);
-            }
+            ws.Options.SetRequestHeader(header.Key, header.Value);
         }
 
         var uri = new Uri(
@@ -195,6 +163,7 @@ public class Edge_tts
 
         try
         {
+            // 此处有 AI 生成内容，请仔细甄别
             await ws.ConnectAsync(uri, CancellationToken.None);
             await ws.SendAsync(GetArraySegmentFromString(ConvertToAudioFormatWebSocketString(voice.SuggestedCodec)), WebSocketMessageType.Text, true, CancellationToken.None);
             await ws.SendAsync(GetArraySegmentFromString(ConvertToSsmlWebSocketString(sendRequestId, voice.Locale, voice.Name, option.Rate, ((int)option.Volume * 100), option.Text)), WebSocketMessageType.Text, true, CancellationToken.None);

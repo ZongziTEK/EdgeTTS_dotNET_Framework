@@ -3,6 +3,8 @@
 	<PropertyGroup>
 		<TargetFramework>net472</TargetFramework>
 
+		<LangVersion>latest</LangVersion>
+		
 		<!--以下是我们自己添加的-->
 		<!--版本号，重要性不必多说-->
 		<Version>1.1.2</Version>

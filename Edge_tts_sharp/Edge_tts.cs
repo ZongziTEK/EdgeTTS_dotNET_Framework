@@ -16,8 +16,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using WebSocketSharp;
-using WebSocketState = System.Net.WebSockets.WebSocketState;
 
 
 namespace Edge_tts_sharp;
@@ -138,21 +136,17 @@ public class Edge_tts
     /// <param name="voice">音源参数</param>
     public static async Task InvokeAsync(PlayOption option, eVoice voice, Action<List<byte>> callback, IProgress<List<byte>> progress = null)
     {
-        var binary_delim = "Path:audio\r\n";
-        var sendRequestId = GetGUID();
         var binary = new List<byte>();
-        bool IsTurnEnd = false;
+        var sendRequestId = GetGUID();
 
         var ws = new ClientWebSocket()
         {
             Options =
             {
                 Cookies = new CookieContainer()
-                {
-
-                }
             }
         };
+
         foreach (var header in Headers)
         {
             ws.Options.SetRequestHeader(header.Key, header.Value);
@@ -162,22 +156,25 @@ public class Edge_tts
                       $"wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1" +
                       $"?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4" +
                       $"&ConnectionId={sendRequestId}" +
-                  $"&Sec-MS-GEC={GenerateSecMsGecToken()}" +
-                  $"&Sec-MS-GEC-Version=1-{ChromiumVersion}" +
-                  "");
-        // ws.Options.HttpVersion = HttpVersion.Version20;
-        // ws.Options.Proxy = new WebProxy(new Uri("http://127.0.0.1:8888"));
+                      $"&Sec-MS-GEC={GenerateSecMsGecToken()}" +
+                      $"&Sec-MS-GEC-Version=1-{ChromiumVersion}");
+
         ws.Options.Cookies.SetCookies(new Uri("https://speech.platform.bing.com"), $"muid={Guid.NewGuid().ToString().ToUpper().Replace("-", "")};");
-        var tcs = new TaskCompletionSource<object>();
-        var listenTask = Task.Run(async () =>
+
+        try
         {
+            // 此处有 AI 生成内容，请仔细甄别
+            await ws.ConnectAsync(uri, CancellationToken.None);
+            await ws.SendAsync(GetArraySegmentFromString(ConvertToAudioFormatWebSocketString(voice.SuggestedCodec)), WebSocketMessageType.Text, true, CancellationToken.None);
+            await ws.SendAsync(GetArraySegmentFromString(ConvertToSsmlWebSocketString(sendRequestId, voice.Locale, voice.Name, option.Rate, ((int)option.Volume * 100), option.Text)), WebSocketMessageType.Text, true, CancellationToken.None);
+
             // 用于接收网络流的底层缓冲区
             var bufferArray = new byte[1024 * 32];
             var bufferSegment = new ArraySegment<byte>(bufferArray);
-
-            // 用于组装完整 WebSocket 消息的临时容器（处理分片）
+            // 用于组装完整 WebSocket 消息的临时容器
             var messageBuffer = new List<byte>();
 
+            // 只要处于打开状态，就继续接收
             while (ws.State == WebSocketState.Open || ws.State == WebSocketState.Connecting)
             {
                 if (ws.State == WebSocketState.Connecting)
@@ -191,91 +188,90 @@ public class Edge_tts
                 {
                     result = await ws.ReceiveAsync(bufferSegment, CancellationToken.None);
                 }
-                catch (Exception)
+                catch (WebSocketException ex)
                 {
-                    break; // 连接断开
-                }
-
-                if (result.MessageType == WebSocketMessageType.Close)
-                {
-                    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "NormalClosure", CancellationToken.None);
+                    // 连接断开或其他 WebSocket 错误，直接退出循环
+                    if (Debug) Console.WriteLine($"[WebSocketException] {ex.Message}");
                     break;
                 }
 
-                // 将当前收到的片段加入临时容器
-                // 注意：必须只取 result.Count 长度
+                // 处理分片消息
                 messageBuffer.AddRange(bufferArray.Take(result.Count));
 
-                // 关键点：只有当 EndOfMessage 为 true 时，才表示“当前这一帧”数据收全了
                 if (result.EndOfMessage)
                 {
-                    var fullMessageBytes = messageBuffer.ToArray(); // 转为数组进行处理
-                    messageBuffer.Clear(); // 清空容器准备接收下一条消息
+                    var fullMessageBytes = messageBuffer.ToArray();
+                    messageBuffer.Clear();
 
                     if (result.MessageType == WebSocketMessageType.Text)
                     {
                         var text = Encoding.UTF8.GetString(fullMessageBytes);
-                        // Console.WriteLine($"收到文本: {text}");
                         if (text.Contains("Path:turn.end"))
                         {
-                            IsTurnEnd = true;
-                            // 这里通常不需要 Close，除非你想读完一句就断开
-                            // await ws.CloseAsync(...); 
+                            // 收到结束标记，退出循环
                             break;
                         }
                     }
                     else if (result.MessageType == WebSocketMessageType.Binary)
                     {
-                        // 1. 基础长度检查
-                        if (fullMessageBytes.Length < 2) continue;
-
-                        // 2. 解析头部长度 (Big Endian)
-                        var headerLength = (ushort)((fullMessageBytes[0] << 8) | fullMessageBytes[1]);
-
-                        // 3. 校验数据完整性 (防止索引越界)
-                        if (fullMessageBytes.Length < headerLength + 2)
+                        if (fullMessageBytes.Length >= 2)
                         {
-                            // 这种情况理论上不应该发生（因为我们已经判断了 EndOfMessage），
-                            // 但如果发生了，说明协议解析有问题，不能简单的 continue 丢弃，
-                            // 不过 Edge TTS 协议通常很标准。
-                            continue;
-                        }
+                            var headerLength = (ushort)((fullMessageBytes[0] << 8) | fullMessageBytes[1]);
+                            if (fullMessageBytes.Length >= headerLength + 2)
+                            {
+                                var audioStartIndex = 2 + headerLength;
+                                var audioLength = fullMessageBytes.Length - audioStartIndex;
 
-                        // 4. 提取音频 (跳过 2字节Length + HeaderBody)
-                        // 只有音频数据部分才需要加入到 binary 列表
-                        var audioStartIndex = 2 + headerLength;
-                        var audioLength = fullMessageBytes.Length - audioStartIndex;
-
-                        if (audioLength > 0)
-                        {
-                            var audioData = new byte[audioLength];
-                            Array.Copy(fullMessageBytes, audioStartIndex, audioData, 0, audioLength);
-                            binary.AddRange(audioData);
+                                if (audioLength > 0)
+                                {
+                                    var audioData = new byte[audioLength];
+                                    Array.Copy(fullMessageBytes, audioStartIndex, audioData, 0, audioLength);
+                                    binary.AddRange(audioData);
+                                }
+                            }
                         }
+                    }
+                    else if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        // 服务器发送了关闭帧
+                        break;
                     }
                 }
             }
+        }
+        catch (Exception ex)
+        {
+            if (Debug) Console.WriteLine($"[InvokeAsync Exception] {ex.Message}");
+            throw;
+        }
+        finally // 此处有 AI 生成内容，请仔细甄别
+        {
+            // 确保资源释放和优雅关闭
+            // 只有在连接处于 Open 或 CloseReceived 状态时才尝试发送 Close 帧
+            if (ws.State == WebSocketState.Open || ws.State == WebSocketState.CloseReceived)
+            {
+                try
+                {
+                    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "NormalClosure", CancellationToken.None);
+                }
+                catch { /* 忽略关闭时的错误 */ }
+            }
+            ws.Dispose();
 
-            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
-            // 循环结束后处理回调和保存
+            // 处理回调数据
             if (binary.Count > 0)
             {
-                // 确保回调存在
                 callback?.Invoke(binary);
 
                 if (!string.IsNullOrEmpty(option.SavePath))
                 {
-                    // 建议使用 FileShare.ReadWrite 防止占用
+                    // 确保文件写入不会阻塞主线程太长时间
                     await Task.Run(() => File.WriteAllBytes(option.SavePath, binary.ToArray()));
                 }
             }
-        });
-        await ws.ConnectAsync(uri, CancellationToken.None);
-        await ws.SendAsync(GetArraySegmentFromString(ConvertToAudioFormatWebSocketString(voice.SuggestedCodec)), WebSocketMessageType.Text, true, CancellationToken.None);
-        await ws.SendAsync(GetArraySegmentFromString(ConvertToSsmlWebSocketString(sendRequestId, voice.Locale, voice.Name, option.Rate, ((int)option.Volume * 100), option.Text)), WebSocketMessageType.Text, true, CancellationToken.None);
-        await listenTask;
-        ws.Dispose();
+        }
     }
+
 
     /// <summary>
     /// 另存为mp3文件

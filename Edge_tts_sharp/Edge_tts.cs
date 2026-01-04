@@ -136,15 +136,47 @@ public class Edge_tts
     /// <param name="voice">音源参数</param>
     public static async Task InvokeAsync(PlayOption option, eVoice voice, Action<List<byte>> callback, IProgress<List<byte>> progress = null)
     {
+        // 添加反射代码移除 HTTP 头限制
+        var assembly = typeof(HttpWebRequest).Assembly;
+        var headerInfoTableType = assembly.GetType("System.Net.HeaderInfoTable");
+        if (headerInfoTableType != null)
+        {
+            var headerHashTableField = headerInfoTableType.GetField("HeaderHashTable",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            if (headerHashTableField != null)
+            {
+                var hashTable = headerHashTableField.GetValue(null) as System.Collections.Hashtable;
+                if (hashTable != null)
+                {
+                    var headerInfoType = assembly.GetType("System.Net.HeaderInfo");
+                    var isRequestRestrictedField = headerInfoType?.GetField("IsRequestRestricted",
+                        BindingFlags.NonPublic | BindingFlags.Instance);
+
+                    if (isRequestRestrictedField != null)
+                    {
+                        foreach (System.Collections.DictionaryEntry entry in hashTable)
+                        {
+                            var headerInfo = entry.Value;
+                            var isRestricted = (bool)isRequestRestrictedField.GetValue(headerInfo);
+                            if (isRestricted)
+                            {
+                                isRequestRestrictedField.SetValue(headerInfo, false);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         var binary = new List<byte>();
         var sendRequestId = GetGUID();
 
         var ws = new ClientWebSocket()
         {
             Options =
-            {
-                Cookies = new CookieContainer()
-            }
+        {
+            Cookies = new CookieContainer()
+        }
         };
 
         foreach (var header in Headers)
@@ -254,7 +286,7 @@ public class Edge_tts
                 {
                     await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "NormalClosure", CancellationToken.None);
                 }
-                catch { /* 忽略关闭时的错误 */ }
+                catch { }
             }
             ws.Dispose();
 
@@ -265,7 +297,6 @@ public class Edge_tts
 
                 if (!string.IsNullOrEmpty(option.SavePath))
                 {
-                    // 确保文件写入不会阻塞主线程太长时间
                     await Task.Run(() => File.WriteAllBytes(option.SavePath, binary.ToArray()));
                 }
             }
